@@ -1,6 +1,25 @@
 use core::cmp::{Ordering, Ordering::*};
 use core::future::Future;
 
+/// A type that can be used as a dimension of a [`Point3d`].
+///
+/// Must be totally ordered, and must provide an order-homomorphic [encoding function](https://willowprotocol.org/specs/encodings/index.html#encoding_function), that is., comparing encodings lexicographically must coincide with the total order on the dimension.
+pub trait Dimension: Ord + Sized {
+    /// The maximum length of any [homomorphic encoding](Self::homomorphic_encode).
+    const HOMOMORPHIC_ENCODING_MAX_LENGTH: usize;
+
+    /// Do the [homomorphic encodings](Self::homomorphic_encode) of all values have the same length? If this is `false`, then no encoding may contain two successive zero bytes (the combined encoding of a `3dPoint` will use two consecutive zero bytes to terminate variable-width encodings, so things will subtly break if the encodings contained consecutive zero bytes themselves).
+    const IS_FIXED_WIDTH_ENCODING: bool;
+
+    /// Encode `self` into a slice of at least `Self::HOMOMORPHIC_ENCODING_LENGTH` many bytes, and return how long the produced encoding is. The [encoding](https://willowprotocol.org/specs/encodings/index.html#encoding_function) must be order-homomorphic, that is: for any two values `v1` and `v2` with `v1 <= v2`, the encoding of `v1` must be lexicographically less than or equal to the encoding of `v2`. Further, if [`IS_FIXED_WIDTH_ENCODING`](Self::IS_FIXED_WIDTH_ENCODING) is `false`, then no encoding may contain two consecutive zero bytes.
+    ///
+    /// If the encoding is longer than the given slice, this function must panic.
+    fn homomorphic_encode(&self, buf: &mut [u8]) -> usize;
+
+    /// Decode the [homomorphic encoding](Self::homomorphic_encode) from a slice. On success, return the decoded value, and the number of bytes that were decoded.
+    fn homomorphic_decode(buf: &[u8]) -> Result<(Self, usize), ()>;
+}
+
 /// A point in a 3d space. Note that this struct does *not* implement `Ord`. Instead it provides three functions for three possible choices of total orderings: [`cmp_xyz`](Self::cmp_xyz), [`cmp_yzx`](Self::cmp_yzx), and [`cmp_zxy`](Self::cmp_zxy). This is to make sure that any comparisons explicitly select an ordering.
 ///
 /// The three dimensions have types `X`, `Y`, and `Z`.
@@ -255,57 +274,38 @@ impl<X: Dimension, Y: Dimension, Z: Dimension> Point3d<X, Y, Z> {
     }
 }
 
-/// A type that can be used as a dimension of a [`Point3d`].
-///
-/// Must be totally ordered, and must provide an order-homomorphic [encoding function](https://willowprotocol.org/specs/encodings/index.html#encoding_function), that is., comparing encodings lexicographically must coincide with the total order on the dimension.
-pub trait Dimension: Ord + Sized {
-    /// The maximum length of any [homomorphic encoding](Self::homomorphic_encode).
-    const HOMOMORPHIC_ENCODING_MAX_LENGTH: usize;
+// /// A persistent storage backend that maps bytestrings keys to values of some type `V`, and allows for efficient access based on the lexicographic ordering of the keys.
+// pub trait BackEnd<V> {
+//     /// Type of errors that can occur when interacting with the backend.
+//     type Error;
 
-    /// Do the [homomorphic encodings](Self::homomorphic_encode) of all values have the same length? If this is `false`, then no encoding may contain two successive zero bytes (the combined encoding of a `3dPoint` will use two consecutive zero bytes to terminate variable-width encodings, so things will subtly break if the encodings contained consecutive zero bytes themselves).
-    const IS_FIXED_WIDTH_ENCODING: bool;
+//     /// Insert a kv pair. Returns the old value for that key, if there was any.
+//     ///
+//     /// This need not be persisted to disk immediately, persistence may be delayed until [`flush`](Self::flush) is called. All subsequent method calls must incorporat the insertion though, even if it has not been persisted yet.
+//     fn insert(
+//         &mut self,
+//         key: &[u8],
+//         value: V,
+//     ) -> impl Future<Output = Result<Option<V>, Self::Error>>;
 
-    /// Encode `self` into a slice of at least `Self::HOMOMORPHIC_ENCODING_LENGTH` many bytes, and return how long the produced encoding is. The [encoding](https://willowprotocol.org/specs/encodings/index.html#encoding_function) must be order-homomorphic, that is: for any two values `v1` and `v2` with `v1 <= v2`, the encoding of `v1` must be lexicographically less than or equal to the encoding of `v2`. Further, if [`IS_FIXED_WIDTH_ENCODING`](Self::IS_FIXED_WIDTH_ENCODING) is `false`, then no encoding may contain two consecutive zero bytes.
-    ///
-    /// If the encoding is longer than the given slice, this function must panic.
-    fn homomorphic_encode(&self, buf: &mut [u8]) -> usize;
+//     /// Delete a kv pair. Returns the old value for that key, if there was any.
+//     ///
+//     /// This need not be persisted to disk immediately, persistence may be delayed until [`flush`](Self::flush) is called. All subsequent method calls must incorporat the deletion though, even if it has not been persisted yet.
+//     fn delete(&mut self, key: &[u8]) -> impl Future<Output = Result<Option<V>, Self::Error>>;
 
-    /// Decode the [homomorphic encoding](Self::homomorphic_encode) from a slice. On success, return the decoded value, and the number of bytes that were decoded.
-    fn homomorphic_decode(buf: &[u8]) -> Result<(Self, usize), ()>;
-}
+//     /// Commit all mutations that have been performed so far to disk. When the Future is done, the changes are guaranteed to be persisted.
+//     fn flush(&mut self) -> impl Future<Output = Result<(), Self::Error>>;
 
-/// A persistent storage backend that maps bytestrings keys to values of some type `V`, and allows for efficient access based on the lexicographic ordering of the keys.
-pub trait BackEnd<V> {
-    /// Type of errors that can occur when interacting with the backend.
-    type Error;
+//     /// Get the value associated with the given key, if there is any.
+//     fn get(&self, key: &[u8]) -> impl Future<Output = Result<Option<V>, Self::Error>>;
 
-    /// Insert a kv pair. Returns the old value for that key, if there was any.
-    ///
-    /// This need not be persisted to disk immediately, persistence may be delayed until [`flush`](Self::flush) is called. All subsequent method calls must incorporat the insertion though, even if it has not been persisted yet.
-    fn insert(
-        &mut self,
-        key: &[u8],
-        value: V,
-    ) -> impl Future<Output = Result<Option<V>, Self::Error>>;
+//     /// Get the greatest kv pair whose key is less than or equal to the given key, if there is any.
+//     fn find_lte(&self, key: &[u8])
+//         -> impl Future<Output = Result<Option<(&[u8], V)>, Self::Error>>;
 
-    /// Delete a kv pair. Returns the old value for that key, if there was any.
-    ///
-    /// This need not be persisted to disk immediately, persistence may be delayed until [`flush`](Self::flush) is called. All subsequent method calls must incorporat the deletion though, even if it has not been persisted yet.
-    fn delete(&mut self, key: &[u8]) -> impl Future<Output = Result<Option<V>, Self::Error>>;
+//     /// Get the least kv pair whose key is greater than or equal to the given key, if there is any.
+//     fn find_gte(&self, key: &[u8])
+//         -> impl Future<Output = Result<Option<(&[u8], V)>, Self::Error>>;
+// }
 
-    /// Commit all mutations that have been performed so far to disk. When the Future is done, the changes are guaranteed to be persisted.
-    fn flush(&mut self) -> impl Future<Output = Result<(), Self::Error>>;
-
-    /// Get the value associated with the given key, if there is any.
-    fn get(&self, key: &[u8]) -> impl Future<Output = Result<Option<V>, Self::Error>>;
-
-    /// Get the greatest kv pair whose key is less than or equal to the given key, if there is any.
-    fn find_lte(&self, key: &[u8])
-        -> impl Future<Output = Result<Option<(&[u8], V)>, Self::Error>>;
-
-    /// Get the least kv pair whose key is greater than or equal to the given key, if there is any.
-    fn find_gte(&self, key: &[u8])
-        -> impl Future<Output = Result<Option<(&[u8], V)>, Self::Error>>;
-}
-
-// TODO batch/transaction
+// // TODO batch/transaction
