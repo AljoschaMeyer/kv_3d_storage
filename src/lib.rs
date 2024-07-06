@@ -30,7 +30,7 @@
 //! 
 //! To allow to efficiently answer certain queries, all our trees are [monoid trees](https://github.com/AljoschaMeyer/rbsr_short/blob/main/main.pdf), based off the [`LiftingCommutativeMonoid` trait](monoid::LiftingCommutativeMonoid). Monoids must be commutative, or things will randomly break. We always employ the counting monoid, plus an arbitrary user-specified monoid.
 //! 
-//! TODO mapping of tree to set of kv entries
+//! We work with monoid-3d-ish-zip-trees conceptually, but we do not implement them directly. Instead, we define for any tree a corresponding set of key-value pairs to store in the storage backend. All algorithms need to implemented in terms of these *kv-trees*. The precise definition of kv-trees and generic functionality is implemented in the `kv_tree` module.
 
 
 mod point3d;
@@ -42,6 +42,5 @@ pub use backend::*;
 mod monoid;
 pub use monoid::*;
 
-
-
-
+mod kv_tree;
+pub use kv_tree::*;
